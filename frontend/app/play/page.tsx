@@ -63,6 +63,11 @@ import {
 } from "../../lib/runtime-config";
 import { useAuthRedirect } from "../../hooks/useAuthRedirect";
 import {
+    InGameEditorSessionHost,
+    InGameEditorToggleButton,
+} from "../../components/editor/InGameEditorWorkspace";
+import { useGameDataAdmin } from "../../lib/editor/useGameDataAdmin";
+import {
     VIEWPORT_PIXEL_HEIGHT,
     VIEWPORT_PIXEL_WIDTH,
 } from "../../lib/viewport";
@@ -677,6 +682,17 @@ function HomeContent() {
         when: "unauthenticated",
         preserveRedirect: true,
     });
+    const editorAdminState = useGameDataAdmin(
+        Boolean(authSession) && !arenaMode,
+    );
+    const [isEditorMode, setIsEditorMode] = useState(false);
+    const isEditorActive = editorAdminState === "allowed" && isEditorMode;
+    const handleToggleEditorMode = useCallback(() => {
+        if (editorAdminState !== "allowed") {
+            return;
+        }
+        setIsEditorMode((current) => !current);
+    }, [editorAdminState]);
     const selectedCharacter = useMemo(
         () =>
             authSession?.characters.find(
@@ -2128,11 +2144,17 @@ function HomeContent() {
     }, [isChatOpen]);
 
     useEffect(() => {
-        if (!status.connected && isChatOpen) {
+        if (editorAdminState !== "allowed" && isEditorMode) {
+            setIsEditorMode(false);
+        }
+    }, [editorAdminState, isEditorMode]);
+
+    useEffect(() => {
+        if ((!status.connected || isEditorActive) && isChatOpen) {
             setIsChatOpen(false);
             setChatMessage("");
         }
-    }, [isChatOpen, status.connected]);
+    }, [isChatOpen, isEditorActive, status.connected]);
 
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
@@ -2147,7 +2169,12 @@ function HomeContent() {
                 target instanceof HTMLSelectElement ||
                 (target instanceof HTMLElement && target.isContentEditable);
 
-            if (event.key === "Enter" && !isTypingTarget && !isChatOpen) {
+            if (
+                event.key === "Enter" &&
+                !isTypingTarget &&
+                !isChatOpen &&
+                !isEditorActive
+            ) {
                 event.preventDefault();
                 setIsChatOpen(true);
                 return;
@@ -2161,7 +2188,7 @@ function HomeContent() {
 
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [isChatOpen, status.connected]);
+    }, [isChatOpen, isEditorActive, status.connected]);
 
     const submitChatMessage = useCallback(() => {
         const result = buildChatMessageForTab(
@@ -2617,27 +2644,42 @@ function HomeContent() {
     );
 
     const fullscreenToggleControl = (
-        <div className="pointer-events-none flex flex-col items-end gap-2">
-            {showFullscreenHint ? (
-                <div className="rounded-full border border-white/10 bg-stone-950/70 px-3 py-1 text-[10px] uppercase tracking-[0.24em] text-stone-300/85 shadow-xl backdrop-blur-md">
-                    Esc para salir
-                </div>
-            ) : null}
-            {fullscreenToggleButton}
+        <div className="pointer-events-none flex items-end gap-2">
+            <InGameEditorToggleButton
+                adminState={editorAdminState}
+                isEditMode={isEditorActive}
+                onToggle={handleToggleEditorMode}
+            />
+            <div className="pointer-events-none flex flex-col items-end gap-2">
+                {showFullscreenHint ? (
+                    <div className="rounded-full border border-white/10 bg-stone-950/70 px-3 py-1 text-[10px] uppercase tracking-[0.24em] text-stone-300/85 shadow-xl backdrop-blur-md">
+                        Esc para salir
+                    </div>
+                ) : null}
+                {fullscreenToggleButton}
+            </div>
         </div>
     );
 
     return (
-        <div
-            ref={setGameShellNode}
-            className="game-shell"
-            onContextMenu={(event) => {
-                event.preventDefault();
-            }}
-            onDragStart={(event) => {
-                event.preventDefault();
-            }}
+        <InGameEditorSessionHost
+            adminState={editorAdminState}
+            isEditMode={isEditorActive}
+            mapNumber={selectedMap}
+            panelHeight={`${CANVAS_BASE_HEIGHT}px`}
+            onExitEditMode={() => setIsEditorMode(false)}
         >
+            {(editorSlots) => (
+                <div
+                    ref={setGameShellNode}
+                    className="game-shell"
+                    onContextMenu={(event) => {
+                        event.preventDefault();
+                    }}
+                    onDragStart={(event) => {
+                        event.preventDefault();
+                    }}
+                >
             <div
                 className={`pointer-events-none fixed inset-0 z-20 flex justify-center overflow-hidden ${
                     isFullscreen ? "items-start" : "items-center"
@@ -2785,7 +2827,10 @@ function HomeContent() {
                                         setCharacterStatsLoading(false);
                                         setCharacterStatsOpen(true);
                                     }}
+                                    inGameEditor={editorSlots.sceneConfig}
                                 />
+
+                                {editorSlots.canvasOverlay}
 
                                 {!arenaMode &&
                                 logoutPending &&
@@ -2883,7 +2928,9 @@ function HomeContent() {
                                                 : "112px"
                                             : challengeOverlayText
                                               ? "88px"
-                                              : "16px",
+                                              : isEditorActive
+                                                ? "56px"
+                                                : "16px",
                                     }}
                                 >
                                     {!isDesktopConsoleLayout
@@ -3095,7 +3142,15 @@ function HomeContent() {
                                 ) : null}
                             </div>
 
-                            {isCharacterSettingsLoading ? (
+                            {editorSlots.bottomBar ? (
+                                <ScaledHudFrame
+                                    scale={hudScale}
+                                    baseWidth={CANVAS_BASE_WIDTH}
+                                    onMeasure={handleMacroBarMeasure}
+                                >
+                                    {editorSlots.bottomBar}
+                                </ScaledHudFrame>
+                            ) : isCharacterSettingsLoading ? (
                                 <ScaledHudFrame
                                     scale={hudScale}
                                     baseWidth={CANVAS_BASE_WIDTH}
@@ -3167,7 +3222,8 @@ function HomeContent() {
                                         {fullscreenToggleControl}
                                     </div>
                                 ) : null}
-                                <InventoryFloatingPanel
+                                {editorSlots.dockPanel ?? (
+                                    <InventoryFloatingPanel
                                     hud={hud}
                                     mapName={status.worldName}
                                     connected={status.connected}
@@ -3393,6 +3449,7 @@ function HomeContent() {
                                         authSession?.selectedCharacterId ?? null
                                     }
                                 />
+                                )}
 
                                 <div className="pointer-events-auto flex w-full flex-col gap-2 rounded-2xl border border-stone-700/80 bg-stone-950/84 px-4 py-3 text-xs text-stone-100 shadow-2xl backdrop-blur-md">
                                     <div className="flex items-center justify-center gap-3 uppercase tracking-[0.22em]">
@@ -3849,7 +3906,11 @@ function HomeContent() {
                     </div>
                 </div>
             ) : null}
-        </div>
+
+            {editorSlots.modal}
+                </div>
+            )}
+        </InGameEditorSessionHost>
     );
 }
 

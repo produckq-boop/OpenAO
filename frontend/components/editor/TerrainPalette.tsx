@@ -7,7 +7,10 @@ import {
     useEditorStore,
     type TerrainBrush,
 } from "../../lib/editor/editorStore";
-import { uploadGraphicPng } from "../../lib/editor/editorApi";
+import {
+    uploadGraphicPng,
+    type UploadedGraphic,
+} from "../../lib/editor/editorApi";
 import { invalidateSharedGraphicsDB } from "../../lib/graphicTextures";
 import GraphicPreview from "./GraphicPreview";
 import VirtualizedList from "./VirtualizedList";
@@ -18,6 +21,10 @@ const COLUMNS = 3;
 
 type PaletteTab = "terrain" | "uploaded";
 
+type TerrainPaletteProps = {
+    onUploadedGraphic?: (uploaded: UploadedGraphic) => Promise<void> | void;
+};
+
 /**
  * Paleta de terreno del mapa: entradas de terrain.json mas los graficos
  * subidos por administradores. Permite subir PNGs nuevos al modo construccion.
@@ -26,7 +33,9 @@ type PaletteTab = "terrain" | "uploaded";
  * mapa pasa las ochocientas entradas y hacen falta dos grillas virtualizadas
  * independientes, no una sola con dos encabezados pegajosos.
  */
-export default function TerrainPalette() {
+export default function TerrainPalette({
+    onUploadedGraphic,
+}: TerrainPaletteProps = {}) {
     const { terrain, tool, setTool, addRecent, refreshMapData } =
         useEditorStore();
     const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -70,6 +79,7 @@ export default function TerrainPalette() {
             // asi que sin descartarlo la miniatura del PNG nuevo saldria vacia
             // hasta recargar la pagina.
             invalidateSharedGraphicsDB();
+            await onUploadedGraphic?.(uploaded);
             await refreshMapData();
             setTab("uploaded");
             handleSelect(createUploadedGraphicBrush(uploaded.grhIndex));

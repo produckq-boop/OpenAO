@@ -161,6 +161,9 @@ export default function EditorCanvas({
         tool,
         overrides,
         entities,
+        draftExits,
+        setDraftExit,
+        removeDraftExit,
         npcs,
         refreshMapData,
         refreshStatus,
@@ -814,6 +817,13 @@ export default function EditorCanvas({
             const key = tileKey(x, y);
             const layers = draftLayersByTile.get(key) ?? [];
             const kinds = draftEntitiesByTile.get(key) ?? [];
+            const hasDraftExit = draftExits.some(
+                (entry) => entry.x === x && entry.y === y,
+            );
+
+            if (hasDraftExit) {
+                removeDraftExit(x, y);
+            }
 
             if (layers.length === 0 && kinds.length === 0) {
                 return;
@@ -835,7 +845,14 @@ export default function EditorCanvas({
 
             await request;
         },
-        [draftEntitiesByTile, draftLayersByTile, mapNum, scheduleFlush],
+        [
+            draftEntitiesByTile,
+            draftExits,
+            draftLayersByTile,
+            mapNum,
+            removeDraftExit,
+            scheduleFlush,
+        ],
     );
 
     const applyToolToTile = useCallback(
@@ -857,6 +874,17 @@ export default function EditorCanvas({
             try {
                 if (tool.kind === "erase") {
                     await eraseTile(x, y);
+                    return;
+                }
+
+                if (tool.kind === "exit") {
+                    setDraftExit({
+                        x,
+                        y,
+                        targetMap: tool.targetMap,
+                        targetX: tool.targetX,
+                        targetY: tool.targetY,
+                    });
                     return;
                 }
 
@@ -912,7 +940,7 @@ export default function EditorCanvas({
                 );
             }
         },
-        [eraseTile, mapNum, scheduleFlush, tool],
+        [eraseTile, mapNum, scheduleFlush, setDraftExit, tool],
     );
 
     // Interacciones de camara y pintado.

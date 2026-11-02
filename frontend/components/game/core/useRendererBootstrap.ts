@@ -141,6 +141,9 @@ type UseRendererBootstrapOptions = {
     updateEntityFXPositions: (engine: any) => void;
     debugCombatOverlayTextRef: RefObject<string>;
     setInspectedNpc: (value: any) => void;
+    onEditorPointerDown?: (event: FederatedPointerEvent) => boolean;
+    onEditorPointerMove?: (event: FederatedPointerEvent) => void;
+    onEditorPointerUp?: (event: FederatedPointerEvent) => boolean;
 };
 
 export function useRendererBootstrap(options: UseRendererBootstrapOptions) {
@@ -449,6 +452,10 @@ export function useRendererBootstrap(options: UseRendererBootstrapOptions) {
                 };
 
                 mapContainer.on("pointerdown", (event) => {
+                    if (options.onEditorPointerDown?.(event)) {
+                        return;
+                    }
+
                     const interaction = getInteractionContext(event);
                     if (!interaction) {
                         return;
@@ -549,7 +556,15 @@ export function useRendererBootstrap(options: UseRendererBootstrapOptions) {
                     );
                 });
 
+                mapContainer.on("pointermove", (event) => {
+                    options.onEditorPointerMove?.(event);
+                });
+
                 mapContainer.on("pointerup", (event) => {
+                    if (options.onEditorPointerUp?.(event)) {
+                        return;
+                    }
+
                     const targetingMode = options.targetingModeRef.current;
                     if (!targetingMode || event.button === 2) {
                         return;

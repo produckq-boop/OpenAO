@@ -63,6 +63,8 @@ import {
 } from "../rendering/textureCaches";
 import { useOutgoingRequests } from "../session/useOutgoingRequests";
 import { useGameSession } from "../session/useGameSession";
+import type { InGameEditorSceneConfig } from "../editor/inGameEditorTypes";
+import { useInGameEditorScene } from "../editor/useInGameEditorScene";
 import { handleIncomingGamePacket } from "../session/handleIncomingGamePacket";
 import { useRendererBootstrap } from "./useRendererBootstrap";
 import { useAssetPipeline } from "./useAssetPipeline";
@@ -209,6 +211,7 @@ interface MapRendererProps {
     onAdminOverviewSnapshot?: (snapshot: PanelSnapshot) => void;
     onCharacterStatsSnapshot?: (snapshot: CharacterStatsSnapshot) => void;
     onPerformanceSample?: (sample: PerformanceSample) => void;
+    inGameEditor?: InGameEditorSceneConfig | null;
 }
 
 interface ManualConnectionConfig {
@@ -704,6 +707,7 @@ export default function MapRenderer({
     onAdminOverviewSnapshot,
     onCharacterStatsSnapshot,
     onPerformanceSample,
+    inGameEditor,
 }: MapRendererProps) {
     const canvasRef = useRef<HTMLDivElement>(null);
     const rendererRootRef = useRef<HTMLDivElement>(null);
@@ -1312,6 +1316,35 @@ export default function MapRenderer({
         mergeHud,
     });
 
+    const {
+        isGameplayBlockedByEditor,
+        handleEditorPointerDown,
+        handleEditorPointerMove,
+        handleEditorPointerUp,
+    } = useInGameEditorScene({
+        engineRef,
+        isSceneReady,
+        mapNumber,
+        config: inGameEditor,
+        clearMovementInputState,
+        clearTargetingMode,
+        updateCanvasCursor,
+        preloadGraphicIds,
+        renderMap,
+    });
+
+    const effectiveCanProcessMovementInput = React.useCallback(
+        () => !isGameplayBlockedByEditor() && canProcessMovementInput(),
+        [canProcessMovementInput, isGameplayBlockedByEditor],
+    );
+
+    useEffect(() => {
+        if (engineRef.current) {
+            engineRef.current.canProcessMovementInput =
+                effectiveCanProcessMovementInput;
+        }
+    }, [effectiveCanProcessMovementInput]);
+
     useKeyboardGameplay({
         isMounted,
         engineRef,
@@ -1321,7 +1354,8 @@ export default function MapRenderer({
         movementKeyMapRef,
         movementPressCountsRef,
         movementKeyPriorityRef,
-        canProcessMovementInput,
+        canProcessMovementInput: effectiveCanProcessMovementInput,
+        isGameplayInputDisabled: isGameplayBlockedByEditor,
         clearMovementInputState,
         clearTargetingMode,
         hasEquippedMeleeWeapon,
@@ -1737,7 +1771,7 @@ export default function MapRenderer({
         mergeHud,
         playStepSound,
         renderRemoteEntity,
-        canProcessMovementInput,
+        canProcessMovementInput: effectiveCanProcessMovementInput,
         recordClientGameAction,
         canStartLocalCombatAction,
         registerLocalCombatAction,
@@ -1756,6 +1790,9 @@ export default function MapRenderer({
         updateEntityFXPositions,
         debugCombatOverlayTextRef,
         setInspectedNpc,
+        onEditorPointerDown: handleEditorPointerDown,
+        onEditorPointerMove: handleEditorPointerMove,
+        onEditorPointerUp: handleEditorPointerUp,
     });
 
     const handleSessionPacketRef = useRef<

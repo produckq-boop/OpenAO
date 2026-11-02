@@ -21,6 +21,7 @@ type UseKeyboardGameplayOptions = {
     movementPressCountsRef: { current: Map<number, number> };
     movementKeyPriorityRef: { current: number[] };
     canProcessMovementInput: () => boolean;
+    isGameplayInputDisabled?: () => boolean;
     clearMovementInputState: (engine?: Engine | null) => void;
     clearTargetingMode: () => void;
     hasEquippedMeleeWeapon: () => boolean;
@@ -47,6 +48,7 @@ export function useKeyboardGameplay({
     movementPressCountsRef,
     movementKeyPriorityRef,
     canProcessMovementInput,
+    isGameplayInputDisabled,
     clearMovementInputState,
     clearTargetingMode,
     hasEquippedMeleeWeapon,
@@ -109,6 +111,10 @@ export function useKeyboardGameplay({
             code === "ArrowRight";
 
         const handleKeyDown = (e: KeyboardEvent) => {
+            if (isGameplayInputDisabled?.()) {
+                return;
+            }
+
             const activeEngine = engineRef.current;
             const movementKeyCode = resolveMovementKeyCode(e.code);
             const isSpellListTarget = e.target instanceof HTMLSelectElement;
@@ -332,6 +338,7 @@ export function useKeyboardGameplay({
         hasEquippedMeleeWeapon,
         hasEquippedRangedWeapon,
         hotkeySettingsRef,
+        isGameplayInputDisabled,
         isMounted,
         movementKeyMapRef,
         movementKeyPriorityRef,

@@ -26,6 +26,7 @@ import {
     listEditorNpcs,
     listEditorObjects,
 } from "./editorApi";
+import type { DraftTileExit } from "./inGameEditorTools";
 import { UPLOADED_GRAPHIC_INDEX_START } from "../../utils/gameLoader";
 
 /**
@@ -103,10 +104,17 @@ export function findTerrainBrush(
     return null;
 }
 
+export type ExitToolTarget = {
+    targetMap: number;
+    targetX: number;
+    targetY: number;
+};
+
 export type EditorTool =
     | ({ kind: "terrain" } & TerrainBrush)
     | { kind: "object"; object: EditorObject }
     | { kind: "npc"; npc: EditorNpc }
+    | ({ kind: "exit" } & ExitToolTarget)
     | { kind: "erase" };
 
 export type RecentsEntry = {
@@ -125,6 +133,10 @@ type EditorStoreValue = {
     status: MapStatus | null;
     overrides: MapTileOverride[];
     entities: MapTileEntity[];
+    draftExits: DraftTileExit[];
+    setDraftExit: (exit: DraftTileExit) => void;
+    removeDraftExit: (x: number, y: number) => void;
+    clearDraftExits: () => void;
     tool: EditorTool | null;
     setTool: (tool: EditorTool | null) => void;
     recents: RecentsEntry[];
@@ -136,9 +148,69 @@ type EditorStoreValue = {
 };
 
 const RECENTS_STORAGE_KEY = "editor.recents.v1";
+const DRAFT_EXITS_STORAGE_PREFIX = "editor.draftExits.v1.";
 const DEFAULT_MAP_NUM = 1;
 
 const EditorStoreContext = createContext<EditorStoreValue | null>(null);
+
+function draftExitsStorageKey(mapNum: number): string {
+    return `${DRAFT_EXITS_STORAGE_PREFIX}${mapNum}`;
+}
+
+function readDraftExitsFromStorage(mapNum: number): DraftTileExit[] {
+    if (typeof window === "undefined") {
+        return [];
+    }
+
+    try {
+        const raw = window.localStorage.getItem(draftExitsStorageKey(mapNum));
+
+        if (!raw) {
+            return [];
+        }
+
+        const parsed = JSON.parse(raw) as unknown;
+
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+
+        return parsed.filter(
+            (entry): entry is DraftTileExit =>
+                typeof entry === "object" &&
+                entry !== null &&
+                Number.isInteger((entry as DraftTileExit).x) &&
+                Number.isInteger((entry as DraftTileExit).y) &&
+                Number.isInteger((entry as DraftTileExit).targetMap) &&
+                Number.isInteger((entry as DraftTileExit).targetX) &&
+                Number.isInteger((entry as DraftTileExit).targetY),
+        );
+    } catch {
+        return [];
+    }
+}
+
+function writeDraftExitsToStorage(
+    mapNum: number,
+    exits: DraftTileExit[],
+): void {
+    if (typeof window === "undefined") {
+        return;
+    }
+
+    try {
+        if (exits.length === 0) {
+            window.localStorage.removeItem(draftExitsStorageKey(mapNum));
+        } else {
+            window.localStorage.setItem(
+                draftExitsStorageKey(mapNum),
+                JSON.stringify(exits),
+            );
+        }
+    } catch {
+        // El almacenamiento puede estar lleno o bloqueado; se ignora.
+    }
+}
 
 function readRecentsFromStorage(): RecentsEntry[] {
     if (typeof window === "undefined") {
@@ -195,6 +267,9 @@ export function EditorStoreProvider({
     const [status, setStatus] = useState<MapStatus | null>(null);
     const [overrides, setOverrides] = useState<MapTileOverride[]>([]);
     const [entities, setEntities] = useState<MapTileEntity[]>([]);
+    const [draftExits, setDraftExits] = useState<DraftTileExit[]>(() =>
+        readDraftExitsFromStorage(initialMapNum),
+    );
     const [tool, setTool] = useState<EditorTool | null>(null);
     const [recents, setRecents] = useState<RecentsEntry[]>(() =>
         readRecentsFromStorage(),
@@ -253,10 +328,47 @@ export function EditorStoreProvider({
         setMapNumState(nextMapNum);
         setOverrides([]);
         setEntities([]);
+        setDraftExits(readDraftExitsFromStorage(nextMapNum));
         setStatus(null);
         setTerrain(null);
         setTool(null);
     }, []);
+
+    const setDraftExit = useCallback(
+        (exit: DraftTileExit) => {
+            setDraftExits((current) => {
+                const withoutTarget = current.filter(
+                    (existing) =>
+                        existing.x !== exit.x || existing.y !== exit.y,
+                );
+                const next = [...withoutTarget, exit];
+                writeDraftExitsToStorage(mapNum, next);
+                return next;
+            });
+        },
+        [mapNum],
+    );
+
+    const removeDraftExit = useCallback(
+        (x: number, y: number) => {
+            setDraftExits((current) => {
+                const next = current.filter(
+                    (existing) => existing.x !== x || existing.y !== y,
+                );
+                if (next.length === current.length) {
+                    return current;
+                }
+                writeDraftExitsToStorage(mapNum, next);
+                return next;
+            });
+        },
+        [mapNum],
+    );
+
+    const clearDraftExits = useCallback(() => {
+        setDraftExits([]);
+        writeDraftExitsToStorage(mapNum, []);
+    }, [mapNum]);
 
     const addRecent = useCallback((entry: RecentsEntry) => {
         setRecents((current) => {
@@ -311,6 +423,10 @@ export function EditorStoreProvider({
             status,
             overrides,
             entities,
+            draftExits,
+            setDraftExit,
+            removeDraftExit,
+            clearDraftExits,
             tool,
             setTool,
             recents,
@@ -322,6 +438,8 @@ export function EditorStoreProvider({
         }),
         [
             addRecent,
+            clearDraftExits,
+            draftExits,
             entities,
             isLoading,
             loadError,
@@ -332,6 +450,8 @@ export function EditorStoreProvider({
             recents,
             refreshMapData,
             refreshStatus,
+            removeDraftExit,
+            setDraftExit,
             setMapNum,
             status,
             terrain,
