@@ -21,6 +21,10 @@ type Config = {
   gameDataAdminEmail: string;
   gameDataAdminAccountId: string | null;
   gameDataAdminProxyToken: string | null;
+  userMapMaxMapsPerAccount: number;
+  userMapMaxUploadBytesPerAccount: number;
+  userMapMaxNpcsPerMap: number;
+  userMapMaxObjectsPerMap: number;
 };
 
 const projectRoot = path.resolve(__dirname, "..");
@@ -97,6 +101,13 @@ const config: Config = {
   gameDataAdminEmail: (process.env.GAME_DATA_ADMIN_EMAIL?.trim() || "").toLowerCase(),
   gameDataAdminAccountId: process.env.GAME_DATA_ADMIN_ACCOUNT_ID?.trim() || null,
   gameDataAdminProxyToken: process.env.GAME_DATA_ADMIN_PROXY_TOKEN?.trim() || null,
+  userMapMaxMapsPerAccount: getOptionalNumberEnv("USER_MAP_MAX_MAPS_PER_ACCOUNT", 5),
+  userMapMaxUploadBytesPerAccount: getOptionalNumberEnv(
+    "USER_MAP_MAX_UPLOAD_BYTES_PER_ACCOUNT",
+    5 * 1024 * 1024,
+  ),
+  userMapMaxNpcsPerMap: getOptionalNumberEnv("USER_MAP_MAX_NPCS_PER_MAP", 25),
+  userMapMaxObjectsPerMap: getOptionalNumberEnv("USER_MAP_MAX_OBJECTS_PER_MAP", 100),
 };
 
 export default config;

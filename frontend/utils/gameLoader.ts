@@ -52,9 +52,20 @@ const jsonValueCache = new Map<string, unknown>();
 const mapRequestCache = new Map<number, Promise<MapData>>();
 const mapValueCache = new Map<number, MapData>();
 const DYNAMIC_INSTANCE_MAP_START = 30_000;
+export const DYNAMIC_INSTANCE_MAP_END = 99_999;
 const DYNAMIC_INSTANCE_MAP_STRIDE = 50;
 const CHALLENGE_INSTANCE_MAP_START = 2_000;
 const CHALLENGE_INSTANCE_BASE_MAP_ID = 506;
+/**
+ * Rango reservado para mapas creados por jugadores (#24):
+ * - 1..~500: Mundo oficial
+ * - 500..599: Mapas locales estaticos
+ * - 2.000..29.999: Retos
+ * - 30.000..99.999: Instancias dinamicas
+ * - 100.000..999.999: Espacio aislado de mapas de usuario
+ */
+export const USER_MAP_ID_START = 100_000;
+export const USER_MAP_ID_END = 999_999;
 const MAP_ASSET_VERSIONS: Partial<Record<number, string>> = {
     166: "1.0",
     286: "1.2",
@@ -66,8 +77,29 @@ function cloneMapData(mapData: MapData): MapData {
     return structuredClone(mapData);
 }
 
-function getBaseMapIdFromDynamicInstance(mapNumber: number): number | null {
-    if (mapNumber < DYNAMIC_INSTANCE_MAP_START) {
+export function isUserMapId(mapNumber: number): boolean {
+    return (
+        Number.isInteger(mapNumber) &&
+        mapNumber >= USER_MAP_ID_START &&
+        mapNumber <= USER_MAP_ID_END
+    );
+}
+
+export function clearLoadedMapCache(mapNumber?: number): void {
+    if (typeof mapNumber === "number") {
+        mapValueCache.delete(mapNumber);
+        mapRequestCache.delete(mapNumber);
+        return;
+    }
+    mapValueCache.clear();
+    mapRequestCache.clear();
+}
+
+export function getBaseMapIdFromDynamicInstance(mapNumber: number): number | null {
+    if (
+        mapNumber < DYNAMIC_INSTANCE_MAP_START ||
+        mapNumber > DYNAMIC_INSTANCE_MAP_END
+    ) {
         return null;
     }
 
@@ -624,6 +656,74 @@ export async function loadMapData(mapNumber: number): Promise<MapData> {
 
     const requestPromise = (async () => {
         try {
+            if (isUserMapId(mapNumber)) {
+                const headers: Record<string, string> = {};
+                if (typeof window !== "undefined") {
+                    try {
+                        const token =
+                            window.localStorage?.getItem("authToken") ??
+                            window.localStorage?.getItem("aoweb_session_token");
+                        if (token) {
+                            headers.Authorization = `Bearer ${token}`;
+                        }
+                    } catch {
+                        // Sin acceso a localStorage se consulta como visitante publico.
+                    }
+                }
+
+                const response = await fetch(
+                    `${getApiBaseUrl()}/user-maps/${mapNumber}/map-data`,
+                    {
+                        cache: "no-store",
+                        headers,
+                    },
+                );
+
+                if (!response.ok) {
+                    throw new Error(
+                        `Failed to load user map ${mapNumber}: ${response.status} ${response.statusText}`,
+                    );
+                }
+
+                const payload = (await response.json()) as
+                    | { mapData?: MapData }
+                    | MapData;
+                const resolvedMapData = (
+                    "mapData" in payload &&
+                    payload.mapData &&
+                    typeof payload.mapData === "object"
+                        ? payload.mapData
+                        : payload
+                ) as MapData;
+
+                const mapEntry = resolvedMapData[String(mapNumber)];
+                if (!mapEntry || typeof mapEntry !== "object") {
+                    throw new Error(
+                        `Invalid user map payload for map ${mapNumber}`,
+                    );
+                }
+
+                // Defensa en profundidad en cliente: un mapa de usuario vive en
+                // un espacio aislado y nunca conserva portales hacia mapas fuera
+                // del rango reservado 100.000..999.999.
+                for (const row of Object.values(mapEntry)) {
+                    if (!row || typeof row !== "object") {
+                        continue;
+                    }
+                    for (const tile of Object.values(row)) {
+                        if (
+                            tile?.tileExit &&
+                            !isUserMapId(tile.tileExit.map)
+                        ) {
+                            delete tile.tileExit;
+                        }
+                    }
+                }
+
+                mapValueCache.set(mapNumber, resolvedMapData);
+                return resolvedMapData;
+            }
+
             const dynamicBaseMapNumber = getBaseMapIdFromDynamicInstance(mapNumber);
             if (
                 dynamicBaseMapNumber &&

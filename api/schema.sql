@@ -652,3 +652,37 @@ CREATE INDEX IF NOT EXISTS idx_game_map_tile_entities_map
     ON game_map_tile_entities(map_num, status);
 CREATE INDEX IF NOT EXISTS idx_game_uploaded_graphics_created_at
     ON game_uploaded_graphics(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_game_uploaded_graphics_uploaded_by
+    ON game_uploaded_graphics(uploaded_by_account_id);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  Espacio aislado de mapas de usuario con propiedad y cuotas (#24)
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- Los mapas de usuario viven en el rango reservado 100.000..999.999, fuera del
+-- mundo oficial (1..~500), mapas locales (500..599), retos (2.000..29.999) e
+-- instancias dinamicas (30.000..99.999). Si el dueño borra su cuenta,
+-- ON DELETE CASCADE limpia automaticamente sus borradores y mapas propios.
+CREATE TABLE IF NOT EXISTS game_user_maps (
+    map_num INTEGER PRIMARY KEY CHECK (map_num BETWEEN 100000 AND 999999),
+    owner_account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    name TEXT NOT NULL CHECK (CHAR_LENGTH(BTRIM(name)) BETWEEN 1 AND 80),
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'proposed', 'published', 'archived')),
+    combat_enabled BOOLEAN NOT NULL DEFAULT FALSE CHECK (combat_enabled = FALSE),
+    entry_x INTEGER NOT NULL DEFAULT 50 CHECK (entry_x BETWEEN 1 AND 100),
+    entry_y INTEGER NOT NULL DEFAULT 50 CHECK (entry_y BETWEEN 1 AND 100),
+    tiles JSONB NOT NULL DEFAULT '[]'::jsonb,
+    objects JSONB NOT NULL DEFAULT '[]'::jsonb,
+    npcs JSONB NOT NULL DEFAULT '[]'::jsonb,
+    exits JSONB NOT NULL DEFAULT '[]'::jsonb,
+    npc_count INTEGER NOT NULL DEFAULT 0 CHECK (npc_count >= 0),
+    object_count INTEGER NOT NULL DEFAULT 0 CHECK (object_count >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_game_user_maps_owner_account_id
+    ON game_user_maps(owner_account_id);
+CREATE INDEX IF NOT EXISTS idx_game_user_maps_status
+    ON game_user_maps(status, updated_at DESC);

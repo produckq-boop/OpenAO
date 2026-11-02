@@ -146,6 +146,8 @@ import {
     listUserOnlineStats,
 } from "./repositories/userOnlineStats";
 import { createChallengeHistory } from "./repositories/challenges";
+import { assertOfficialWorldMapMutationAllowed } from "./lib/userMapIsolation";
+import { createUserMapsRouter } from "./routes/userMaps";
 
 const app = express();
 const SLOW_REQUEST_LOG_THRESHOLD_MS = 2000;
@@ -871,6 +873,7 @@ app.put("/admin/game-data/maps/:mapNum/tiles", async (request, response) => {
             response.status(400).json({ error: "Numero de mapa invalido." });
             return;
         }
+        assertOfficialWorldMapMutationAllowed(mapNum);
 
         const parsed = paintTilesSchema.safeParse(request.body);
 
@@ -914,6 +917,7 @@ app.delete(
                 response.status(400).json({ error: "Parametros invalidos." });
                 return;
             }
+            assertOfficialWorldMapMutationAllowed(mapNum);
 
             response.json({ removed: await clearTile(mapNum, x, y, layer) });
         } catch (error) {
@@ -1034,6 +1038,7 @@ app.post("/admin/game-data/maps/:mapNum/publish", async (request, response) => {
             response.status(400).json({ error: "Numero de mapa invalido." });
             return;
         }
+        assertOfficialWorldMapMutationAllowed(mapNum);
 
         response.json(
             await publishMap(mapNum, authorized.session.account._id),
@@ -1057,6 +1062,7 @@ app.post("/admin/game-data/maps/:mapNum/discard", async (request, response) => {
             response.status(400).json({ error: "Numero de mapa invalido." });
             return;
         }
+        assertOfficialWorldMapMutationAllowed(mapNum);
 
         response.json(await discardDrafts(mapNum));
     } catch (error) {
@@ -1081,6 +1087,7 @@ app.post("/admin/game-data/maps/:mapNum/revert", async (request, response) => {
             response.status(400).json({ error: "Numero de mapa invalido." });
             return;
         }
+        assertOfficialWorldMapMutationAllowed(mapNum);
 
         response.json(await revertMap(mapNum));
     } catch (error) {
@@ -1160,6 +1167,7 @@ app.put(
                 response.status(400).json({ error: "Numero de mapa invalido." });
                 return;
             }
+            assertOfficialWorldMapMutationAllowed(mapNum);
 
             const parsed = tileEntitySchema.safeParse(request.body);
 
@@ -1210,6 +1218,7 @@ app.delete(
                 response.status(400).json({ error: "Parametros invalidos." });
                 return;
             }
+            assertOfficialWorldMapMutationAllowed(mapNum);
 
             response.json({
                 removed: await removeTileEntity(mapNum, x, y, kind),
@@ -3074,6 +3083,27 @@ app.get("/user-online-stats", async (request, response) => {
     }
 });
 
+app.use(
+    createUserMapsRouter({
+        resolveSession: async (request) => {
+            const authorized = await getAuthorizedSession(request);
+            if (!authorized) {
+                return null;
+            }
+            const hasAdminHeader =
+                Boolean(config.gameDataAdminProxyToken) &&
+                getGameDataAdminProxyHeader(request) ===
+                    config.gameDataAdminProxyToken;
+            return {
+                accountId: authorized.session.account._id,
+                isAdmin:
+                    hasAdminHeader &&
+                    isAuthorizedGameDataAdmin(authorized.session),
+            };
+        },
+    }),
+);
+
 void start();
 
 /**
@@ -3089,6 +3119,7 @@ app.get("/admin/game-data/maps/:mapNum/npcs", async (request, response) => {
             response.status(400).json({ error: "Número de mapa inválido." });
             return;
         }
+        assertOfficialWorldMapMutationAllowed(mapNum);
 
         const mapsSourceDir = resolveMapsSourceDir();
         const npcs = await loadMapNpcPlacements(mapsSourceDir, mapNum);
@@ -3109,6 +3140,7 @@ app.post("/admin/game-data/maps/:mapNum/npcs", async (request, response) => {
             response.status(400).json({ error: "Número de mapa inválido." });
             return;
         }
+        assertOfficialWorldMapMutationAllowed(mapNum);
 
         const mapsSourceDir = resolveMapsSourceDir();
         const result = await placeMapNpc(
@@ -3142,6 +3174,7 @@ app.put("/admin/game-data/maps/:mapNum/npcs/move", async (request, response) => 
             response.status(400).json({ error: "Número de mapa inválido." });
             return;
         }
+        assertOfficialWorldMapMutationAllowed(mapNum);
 
         const { fromX, fromY, toX, toY } = request.body ?? {};
 
@@ -3185,6 +3218,7 @@ app.delete("/admin/game-data/maps/:mapNum/npcs/:x/:y", async (request, response)
             response.status(400).json({ error: "Parámetros inválidos." });
             return;
         }
+        assertOfficialWorldMapMutationAllowed(mapNum);
 
         const mapsSourceDir = resolveMapsSourceDir();
         const result = await removeMapNpc(mapsSourceDir, mapNum, x, y);
