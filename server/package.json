@@ -28,6 +28,7 @@
         "build": "pnpm run clean && tsc && node scripts/copy-assets.cjs",
         "predev": "pnpm run protocol:build",
         "dev": "NODE_ENV=development tsx watch src/server.ts",
+        "pretest": "pnpm run protocol:build",
         "test": "tsx --test tests/**/*.test.ts",
         "compact-objs": "tsx src/scripts/compactObjsJson.ts",
         "compact-npcs": "tsx src/scripts/compactNpcsJson.ts",

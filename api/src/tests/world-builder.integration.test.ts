@@ -224,3 +224,48 @@ test("unrecognized catalog flags default to false instead of failing", async () 
     assert.equal(hostile.status, 200);
     assert.ok((hostile.data.pagination?.total ?? 0) > 300);
 });
+
+test("internal published map snapshot routes require auth and return clean snapshot payloads", async () => {
+    const unauthorizedAll = await requestJson<{ error?: string }>(
+        "/internal/game-data/maps/published",
+    );
+    assert.equal(unauthorizedAll.status, 401);
+
+    const unauthorizedSingle = await requestJson<{ error?: string }>(
+        "/internal/game-data/maps/1/published",
+    );
+    assert.equal(unauthorizedSingle.status, 401);
+
+    const invalidMapNum = await requestJson<{ error?: string }>(
+        "/internal/game-data/maps/0/published",
+        { headers: { Authorization: API_AUTH } },
+    );
+    assert.equal(invalidMapNum.status, 400);
+
+    const [allPublished, mapOnePublished] = await Promise.all([
+        requestJson<{
+            currentVersion?: number;
+            maps?: unknown[];
+        }>("/internal/game-data/maps/published", {
+            headers: { Authorization: API_AUTH },
+        }),
+        requestJson<{
+            mapNum?: number;
+            version?: number;
+            overrides?: unknown[];
+            entities?: unknown[];
+        }>("/internal/game-data/maps/1/published", {
+            headers: { Authorization: API_AUTH },
+        }),
+    ]);
+
+    assert.equal(allPublished.status, 200);
+    assert.equal(typeof allPublished.data.currentVersion, "number");
+    assert.ok(Array.isArray(allPublished.data.maps));
+
+    assert.equal(mapOnePublished.status, 200);
+    assert.equal(mapOnePublished.data.mapNum, 1);
+    assert.equal(typeof mapOnePublished.data.version, "number");
+    assert.ok(Array.isArray(mapOnePublished.data.overrides));
+    assert.ok(Array.isArray(mapOnePublished.data.entities));
+});

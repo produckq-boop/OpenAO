@@ -716,107 +716,124 @@ export async function renderMap(
 
             const tile = getTileAt(engine.mapData, mapNumber, x, y);
             const tileKey = `${x},${y}`;
+            const graphics = tile?.graphics;
 
-            if (!tile?.graphics) {
-                continue;
-            }
-
-            const layer1 = tile.graphics["1"];
-            if (includedLayers.has("1") && layer1) {
+            if (includedLayers.has("1")) {
+                const layer1 = graphics?.["1"];
                 const layer1Key = `layer1:${tileKey}`;
                 removeSceneLayerSprite(engine, layer1Key);
-                const layer1Sprite = params.renderTileLayer(
-                    engine,
-                    params.canUseEngineContainer,
-                    layer1,
-                    x,
-                    y,
-                    Z_INDEX_LAYERS.FLOOR,
-                    engine.groundLayerContainer ?? engine.mapContainer!,
-                    "tile",
-                );
-                if (layer1Sprite) {
-                    engine.sceneLayerSprites.set(layer1Key, layer1Sprite);
-                }
-            }
-
-            const layer2 = tile.graphics["2"];
-            if (includedLayers.has("2") && layer2) {
-                const layer2Key = `layer2:${tileKey}`;
-                removeSceneLayerSprite(engine, layer2Key);
-                const layer2Sprite = params.renderTileLayer(
-                    engine,
-                    params.canUseEngineContainer,
-                    layer2,
-                    x,
-                    y,
-                    Z_INDEX_LAYERS.BELOW,
-                    engine.belowLayerContainer ?? engine.mapContainer!,
-                    "tile",
-                );
-                if (layer2Sprite) {
-                    engine.sceneLayerSprites.set(layer2Key, layer2Sprite);
-                }
-            }
-
-            if (includeObjects && tile.objInfo && engine.objectsDB) {
-                await params.syncTileObjectVisual(engine, {
-                    mapNumber,
-                    x,
-                    y,
-                    canUseEngineContainer: params.canUseEngineContainer,
-                    loadTextures: params.preloadGraphicIds,
-                    renderTileLayer: params.renderTileLayer,
-                });
-            }
-
-            const layer3 = tile.graphics["3"];
-            if (includedLayers.has("3") && layer3) {
-                const layer3Key = `layer3:${tileKey}`;
-                removeSceneLayerSprite(engine, layer3Key, tileKey);
-                const layer3Container = getMapRowLayerContainer(
-                    engine,
-                    y,
-                    "above",
-                );
-                const layer3Sprite = params.renderTileLayer(
-                    engine,
-                    params.canUseEngineContainer,
-                    layer3,
-                    x,
-                    y,
-                    getRowZIndex(y, Z_INDEX_LAYERS.ABOVE),
-                    layer3Container ?? engine.mapContainer!,
-                    "bottom",
-                );
-
-                if (layer3Sprite && engine.treeGraphicIds.has(Number(layer3))) {
-                    registerTreeSprite(
+                if (layer1) {
+                    const layer1Sprite = params.renderTileLayer(
                         engine,
-                        tileKey,
+                        params.canUseEngineContainer,
+                        layer1,
                         x,
                         y,
-                        layer3Sprite,
-                        "layer3",
+                        Z_INDEX_LAYERS.FLOOR,
+                        engine.groundLayerContainer ?? engine.mapContainer!,
+                        "tile",
                     );
-                }
-
-                if (layer3Sprite) {
-                    engine.sceneLayerSprites.set(layer3Key, layer3Sprite);
+                    if (layer1Sprite) {
+                        engine.sceneLayerSprites.set(layer1Key, layer1Sprite);
+                    }
                 }
             }
 
-            const layer4 = tile.graphics["4"];
-            if (includedLayers.has("4") && layer4 && engine.roofContainer) {
+            if (includedLayers.has("2")) {
+                const layer2 = graphics?.["2"];
+                const layer2Key = `layer2:${tileKey}`;
+                removeSceneLayerSprite(engine, layer2Key);
+                if (layer2) {
+                    const layer2Sprite = params.renderTileLayer(
+                        engine,
+                        params.canUseEngineContainer,
+                        layer2,
+                        x,
+                        y,
+                        Z_INDEX_LAYERS.BELOW,
+                        engine.belowLayerContainer ?? engine.mapContainer!,
+                        "tile",
+                    );
+                    if (layer2Sprite) {
+                        engine.sceneLayerSprites.set(layer2Key, layer2Sprite);
+                    }
+                }
+            }
+
+            if (includeObjects && engine.objectsDB) {
+                if (tile?.objInfo) {
+                    await params.syncTileObjectVisual(engine, {
+                        mapNumber,
+                        x,
+                        y,
+                        canUseEngineContainer: params.canUseEngineContainer,
+                        loadTextures: params.preloadGraphicIds,
+                        renderTileLayer: params.renderTileLayer,
+                    });
+                } else if (engine.objectSprites.has(tileKey)) {
+                    engine.tileObjectRenderRequestIds.set(
+                        tileKey,
+                        (engine.tileObjectRenderRequestIds.get(tileKey) ?? 0) +
+                            1,
+                    );
+                    removeObjectSprite(engine, tileKey);
+                }
+            }
+
+            if (includedLayers.has("3")) {
+                const layer3 = graphics?.["3"];
+                const layer3Key = `layer3:${tileKey}`;
+                removeSceneLayerSprite(engine, layer3Key, tileKey);
+                if (layer3) {
+                    const layer3Container = getMapRowLayerContainer(
+                        engine,
+                        y,
+                        "above",
+                    );
+                    const layer3Sprite = params.renderTileLayer(
+                        engine,
+                        params.canUseEngineContainer,
+                        layer3,
+                        x,
+                        y,
+                        getRowZIndex(y, Z_INDEX_LAYERS.ABOVE),
+                        layer3Container ?? engine.mapContainer!,
+                        "bottom",
+                    );
+
+                    if (
+                        layer3Sprite &&
+                        engine.treeGraphicIds.has(Number(layer3))
+                    ) {
+                        registerTreeSprite(
+                            engine,
+                            tileKey,
+                            x,
+                            y,
+                            layer3Sprite,
+                            "layer3",
+                        );
+                    }
+
+                    if (layer3Sprite) {
+                        engine.sceneLayerSprites.set(layer3Key, layer3Sprite);
+                    }
+                }
+            }
+
+            if (includedLayers.has("4") && engine.roofContainer) {
+                const layer4 = graphics?.["4"];
                 removeRoofSpritesForTile(engine, tileKey);
-                params.renderRoofLayer(
-                    engine,
-                    params.canUseEngineContainer,
-                    layer4,
-                    x,
-                    y,
-                    getRowZIndex(y, Z_INDEX_LAYERS.ROOF),
-                );
+                if (layer4) {
+                    params.renderRoofLayer(
+                        engine,
+                        params.canUseEngineContainer,
+                        layer4,
+                        x,
+                        y,
+                        getRowZIndex(y, Z_INDEX_LAYERS.ROOF),
+                    );
+                }
             }
         }
     }

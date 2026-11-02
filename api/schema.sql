@@ -652,3 +652,9 @@ CREATE INDEX IF NOT EXISTS idx_game_map_tile_entities_map
     ON game_map_tile_entities(map_num, status);
 CREATE INDEX IF NOT EXISTS idx_game_uploaded_graphics_created_at
     ON game_uploaded_graphics(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS game_data_sync_state (
+    domain TEXT PRIMARY KEY,
+    current_version BIGINT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

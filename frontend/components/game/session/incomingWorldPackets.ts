@@ -1,4 +1,12 @@
 import { OBJECT_TYPE } from "../../../lib/aowProtocol";
+import type { GraphicsDB, MapData } from "../../../types/game";
+import {
+    getMapDimensions,
+    invalidateMapCache,
+    isUploadedGraphic,
+    loadMapData,
+    mergeUploadedGraphics,
+} from "../../../utils/gameLoader";
 import { applyHudMemberDelta } from "../state/hudState";
 import type {
     ClanStateDelta,
@@ -8,6 +16,59 @@ import type {
 
 const AREA_SNAPSHOT_RANGE_X = 15;
 const AREA_SNAPSHOT_RANGE_Y = 15;
+const liveReloadStateByEngine = new WeakMap<
+    object,
+    {
+        versions: Map<number, number>;
+        sequences: Map<number, number>;
+    }
+>();
+
+function getEngineLiveReloadState(engine: object) {
+    let state = liveReloadStateByEngine.get(engine);
+    if (!state) {
+        state = {
+            versions: new Map(),
+            sequences: new Map(),
+        };
+        liveReloadStateByEngine.set(engine, state);
+    }
+    return state;
+}
+
+async function ensureUploadedMapGraphicsLoaded(
+    mapData: MapData,
+    mapNumber: number,
+    graphicsDb: GraphicsDB,
+): Promise<void> {
+    const mapEntry = mapData[String(mapNumber)];
+    if (!mapEntry) {
+        return;
+    }
+
+    for (const row of Object.values(mapEntry)) {
+        if (!row) {
+            continue;
+        }
+        for (const tile of Object.values(row)) {
+            const graphics = tile?.graphics;
+            if (!graphics) {
+                continue;
+            }
+            for (const grhIndex of Object.values(graphics)) {
+                const numericGrh = Number(grhIndex);
+                if (
+                    Number.isFinite(numericGrh) &&
+                    isUploadedGraphic(numericGrh) &&
+                    !graphicsDb[String(numericGrh)]
+                ) {
+                    await mergeUploadedGraphics(graphicsDb);
+                    return;
+                }
+            }
+        }
+    }
+}
 
 function getAreaSnapshotCenter(
     ctx: IncomingPacketHandlerArgs["ctx"],
@@ -305,6 +366,92 @@ export async function handleIncomingWorldPacket({
                     }
                 }
             }
+            return true;
+        }
+
+        case "mapLiveReload": {
+            const { mapNum, version } = packet.payload as {
+                mapNum: number;
+                version: number;
+            };
+
+            invalidateMapCache(mapNum);
+
+            const activeMap = engine?.mapNumber ?? renderedMapNumber;
+            if (
+                !engine ||
+                engine.isDestroyed ||
+                !engine.mapData ||
+                activeMap !== mapNum
+            ) {
+                return true;
+            }
+
+            const reloadState = getEngineLiveReloadState(engine);
+            const previousVersion = reloadState.versions.get(mapNum) ?? 0;
+            if (version > 0 && version < previousVersion) {
+                return true;
+            }
+
+            if (version > 0) {
+                reloadState.versions.set(
+                    mapNum,
+                    Math.max(previousVersion, version),
+                );
+            }
+
+            const nextSequence = (reloadState.sequences.get(mapNum) ?? 0) + 1;
+            reloadState.sequences.set(mapNum, nextSequence);
+
+            try {
+                const freshMapData = await loadMapData(mapNum, {
+                    bypassCache: true,
+                    requireOverrides: true,
+                });
+
+                if (
+                    engine.isDestroyed ||
+                    !engine.mapData ||
+                    engine.mapNumber !== mapNum ||
+                    reloadState.sequences.get(mapNum) !== nextSequence
+                ) {
+                    return true;
+                }
+
+                if (engine.graphicsDB) {
+                    await ensureUploadedMapGraphicsLoaded(
+                        freshMapData,
+                        mapNum,
+                        engine.graphicsDB,
+                    );
+                }
+
+                if (
+                    engine.isDestroyed ||
+                    !engine.mapData ||
+                    engine.mapNumber !== mapNum ||
+                    reloadState.sequences.get(mapNum) !== nextSequence
+                ) {
+                    return true;
+                }
+
+                if (freshMapData[mapNum]) {
+                    engine.mapData[mapNum] = freshMapData[mapNum];
+                    engine.mapDimensions = getMapDimensions(
+                        engine.mapData,
+                        mapNum,
+                    );
+                    ctx.applyPendingTileStates(engine);
+                    await ctx.renderMap(engine);
+                    engine.updateCulling?.();
+                }
+            } catch (error) {
+                console.warn(
+                    `[MAPA] No se pudo actualizar en vivo el mapa ${mapNum}:`,
+                    error,
+                );
+            }
+
             return true;
         }
 

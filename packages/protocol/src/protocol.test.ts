@@ -107,4 +107,19 @@ describe("binary primitives", () => {
         const valid = encodeClientPacket("changeHeading", { heading: 2 });
         expect(() => decodeClientPacket(Uint8Array.from([...valid, 99]))).toThrow(/trailing bytes/);
     });
+
+    it("encodes and decodes mapLiveReload server packet frames", () => {
+        const writer = new PacketWriter(CLIENT_PACKET_ID.mapLiveReload);
+        writer.writeShort(166);
+        writer.writeInt(42);
+
+        const frame = writer.toUint8Array();
+        const reader = new PacketReader(frame);
+
+        expect(frame.byteLength).toBe(7);
+        expect(reader.getByte()).toBe(CLIENT_PACKET_ID.mapLiveReload);
+        expect(reader.getShort()).toBe(166);
+        expect(reader.getInt()).toBe(42);
+        expect(reader.remainingBytes).toBe(0);
+    });
 });

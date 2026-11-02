@@ -110,6 +110,8 @@ import {
     getGraphicContent,
     getMapStatus,
     getMapTerrainPalette,
+    getPublishedMapSnapshot,
+    listAllPublishedMapsSnapshot,
     listGraphics,
     listMapOverrides,
     listMapTileEntities,
@@ -122,6 +124,7 @@ import {
     tileEntitySchema,
     uploadGraphic,
 } from "./repositories/worldBuilder";
+import { notifyGameServerMapReload } from "./lib/gameServerNotify";
 import { MAX_PNG_BYTES } from "./lib/pngValidation";
 import {
     getGameCraftingRecipeById,
@@ -1035,9 +1038,16 @@ app.post("/admin/game-data/maps/:mapNum/publish", async (request, response) => {
             return;
         }
 
-        response.json(
-            await publishMap(mapNum, authorized.session.account._id),
+        const result = await publishMap(mapNum, authorized.session.account._id);
+        const liveSync = await notifyGameServerMapReload(
+            mapNum,
+            result.version,
         );
+
+        response.json({
+            ...result,
+            liveSync,
+        });
     } catch (error) {
         const message =
             error instanceof Error ? error.message : "Unexpected error";
@@ -1082,7 +1092,16 @@ app.post("/admin/game-data/maps/:mapNum/revert", async (request, response) => {
             return;
         }
 
-        response.json(await revertMap(mapNum));
+        const result = await revertMap(mapNum);
+        const liveSync = await notifyGameServerMapReload(
+            mapNum,
+            result.version,
+        );
+
+        response.json({
+            ...result,
+            liveSync,
+        });
     } catch (error) {
         const message =
             error instanceof Error ? error.message : "Unexpected error";
@@ -1218,6 +1237,46 @@ app.delete(
             const message =
                 error instanceof Error ? error.message : "Unexpected error";
             response.status(400).json({ error: message });
+        }
+    },
+);
+
+app.get(
+    "/internal/game-data/maps/published",
+    requireAuth,
+    async (_request, response) => {
+        try {
+            response.json(await listAllPublishedMapsSnapshot());
+        } catch (error) {
+            response.status(500).json({
+                error:
+                    error instanceof Error ? error.message : "Unexpected error",
+            });
+        }
+    },
+);
+
+app.get(
+    "/internal/game-data/maps/:mapNum/published",
+    requireAuth,
+    async (request, response) => {
+        try {
+            const rawMapNum = Array.isArray(request.params.mapNum)
+                ? request.params.mapNum[0]
+                : request.params.mapNum;
+            const mapNum = Number.parseInt(rawMapNum ?? "", 10);
+
+            if (!Number.isInteger(mapNum) || mapNum <= 0) {
+                response.status(400).json({ error: "Numero de mapa invalido." });
+                return;
+            }
+
+            response.json(await getPublishedMapSnapshot(mapNum));
+        } catch (error) {
+            response.status(500).json({
+                error:
+                    error instanceof Error ? error.message : "Unexpected error",
+            });
         }
     },
 );

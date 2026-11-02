@@ -456,6 +456,8 @@ export type RuntimeNpc = {
     clan?: string;
     objs?: Record<string, TradeItem>;
     drop?: DropItem[];
+    worldBuilderManaged?: boolean;
+    worldBuilderSpawnKey?: string;
     [key: string]: unknown;
 };
 

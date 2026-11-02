@@ -18,6 +18,7 @@ import {
     getDuplicateAccountIdlePenalizedClientIds,
     type DuplicateAccountPolicyEntry,
 } from "./connectionPolicy";
+import { handleInternalMapReloadHttpRequest, initializePublishedMapsFromApi } from "./mapLiveSync";
 import * as safeZone from "./safeZone";
 
 export {};
@@ -201,11 +202,15 @@ const runtimeTiming = require("./runtimeTiming");
 const handleProtocol = require("./handleProtocol") as HandleProtocolApi;
 
 function handleHttpRequest(request: any, response: any) {
-    void request;
+    void (async () => {
+        if (await handleInternalMapReloadHttpRequest(request, response)) {
+            return;
+        }
 
-    response.statusCode = 404;
-    response.setHeader("Content-Type", "application/json; charset=utf-8");
-    response.end(JSON.stringify({ error: "Not found" }));
+        response.statusCode = 404;
+        response.setHeader("Content-Type", "application/json; charset=utf-8");
+        response.end(JSON.stringify({ error: "Not found" }));
+    })();
 }
 
 const gracefulShutdown = createGracefulShutdown({
@@ -526,6 +531,16 @@ function trackClientActivity(ws: RuntimeClient, packageID: number) {
 
     if (gracefulShutdown.hasStarted()) {
         return;
+    }
+
+    try {
+        const hydratedMaps = await initializePublishedMapsFromApi();
+        console.log(
+            `[GAME DATA] Mapas publicados hidratados desde DB: ${hydratedMaps.hydratedMaps} mapas (${hydratedMaps.appliedOverrides} tiles, ${hydratedMaps.appliedEntities} entidades). Version aplicada: ${hydratedMaps.currentVersion}.`,
+        );
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[GAME DATA] No se pudieron hidratar mapas publicados al iniciar: ${message}`);
     }
 
     vars.serverReady = true;

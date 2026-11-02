@@ -51,6 +51,25 @@ const jsonRequestCache = new Map<string, Promise<unknown>>();
 const jsonValueCache = new Map<string, unknown>();
 const mapRequestCache = new Map<number, Promise<MapData>>();
 const mapValueCache = new Map<number, MapData>();
+const mapCacheEpochs = new Map<number, number>();
+let globalMapCacheEpoch = 0;
+
+function getMapCacheEpoch(mapNumber: number): number {
+    return globalMapCacheEpoch + (mapCacheEpochs.get(mapNumber) ?? 0);
+}
+
+export function invalidateMapCache(mapNumber?: number): void {
+    if (typeof mapNumber === "number") {
+        mapCacheEpochs.set(mapNumber, (mapCacheEpochs.get(mapNumber) ?? 0) + 1);
+        mapValueCache.delete(mapNumber);
+        mapRequestCache.delete(mapNumber);
+        return;
+    }
+
+    globalMapCacheEpoch += 1;
+    mapValueCache.clear();
+    mapRequestCache.clear();
+}
 const DYNAMIC_INSTANCE_MAP_START = 30_000;
 const DYNAMIC_INSTANCE_MAP_STRIDE = 50;
 const CHALLENGE_INSTANCE_MAP_START = 2_000;
@@ -507,7 +526,9 @@ function remapMapDataKey(
  *
  * Si falla, el juego arranca igual sin los graficos subidos.
  */
-async function mergeUploadedGraphics(graphicsDb: GraphicsDB): Promise<void> {
+export async function mergeUploadedGraphics(
+    graphicsDb: GraphicsDB,
+): Promise<void> {
     try {
         const response = await fetch(`${getApiBaseUrl()}/game-data/graphics`, {
             cache: "no-store",
@@ -611,16 +632,36 @@ export async function loadObjectsDB(): Promise<ObjectsDB> {
 /**
  * Load map data from a specific map file
  */
-export async function loadMapData(mapNumber: number): Promise<MapData> {
-    const cachedMap = mapValueCache.get(mapNumber);
-    if (cachedMap) {
-        return cloneMapData(cachedMap);
+export async function loadMapData(
+    mapNumber: number,
+    options?: {
+        bypassCache?: boolean;
+        requireOverrides?: boolean;
+    },
+): Promise<MapData> {
+    const bypassCache = Boolean(options?.bypassCache);
+    const requireOverrides = Boolean(options?.requireOverrides);
+
+    if (bypassCache) {
+        invalidateMapCache(mapNumber);
+    } else {
+        const cachedMap = mapValueCache.get(mapNumber);
+        if (cachedMap) {
+            return cloneMapData(cachedMap);
+        }
+
+        const pendingRequest = mapRequestCache.get(mapNumber);
+        if (pendingRequest) {
+            return pendingRequest.then((mapData) => cloneMapData(mapData));
+        }
     }
 
-    const pendingRequest = mapRequestCache.get(mapNumber);
-    if (pendingRequest) {
-        return pendingRequest.then((mapData) => cloneMapData(mapData));
-    }
+    const requestEpoch = getMapCacheEpoch(mapNumber);
+    const cacheIfFresh = (dataToCache: MapData) => {
+        if (getMapCacheEpoch(mapNumber) === requestEpoch) {
+            mapValueCache.set(mapNumber, dataToCache);
+        }
+    };
 
     const requestPromise = (async () => {
         try {
@@ -641,7 +682,7 @@ export async function loadMapData(mapNumber: number): Promise<MapData> {
                     dynamicBaseMapNumber,
                     mapNumber,
                 );
-                mapValueCache.set(mapNumber, remappedData);
+                cacheIfFresh(remappedData);
                 return remappedData;
             }
 
@@ -665,7 +706,7 @@ export async function loadMapData(mapNumber: number): Promise<MapData> {
                     dynamicBaseMapNumber,
                     mapNumber,
                 );
-                mapValueCache.set(mapNumber, remappedData);
+                cacheIfFresh(remappedData);
                 return remappedData;
             }
 
@@ -676,7 +717,7 @@ export async function loadMapData(mapNumber: number): Promise<MapData> {
                     `local map ${mapNumber}`,
                     { preferLocal: true },
                 );
-                mapValueCache.set(mapNumber, localMapData);
+                cacheIfFresh(localMapData);
                 return localMapData;
             }
 
@@ -695,7 +736,7 @@ export async function loadMapData(mapNumber: number): Promise<MapData> {
                     CHALLENGE_INSTANCE_BASE_MAP_ID,
                     mapNumber,
                 );
-                mapValueCache.set(mapNumber, remappedData);
+                cacheIfFresh(remappedData);
                 return remappedData;
             }
 
@@ -723,15 +764,19 @@ export async function loadMapData(mapNumber: number): Promise<MapData> {
                 assetMapNumber,
                 mapNumber,
             );
-            await applyMapOverrides(decompressedData, mapNumber);
-            mapValueCache.set(mapNumber, decompressedData);
+            await applyMapOverrides(decompressedData, mapNumber, {
+                strict: requireOverrides,
+            });
+            cacheIfFresh(decompressedData);
             return decompressedData;
         } catch (error) {
             console.error(`Error loading map ${mapNumber}:`, error);
             throw error;
         }
     })().finally(() => {
-        mapRequestCache.delete(mapNumber);
+        if (mapRequestCache.get(mapNumber) === requestPromise) {
+            mapRequestCache.delete(mapNumber);
+        }
     });
 
     mapRequestCache.set(mapNumber, requestPromise);
@@ -757,6 +802,13 @@ type MapTileOverride = {
     blocked: boolean | null;
 };
 
+type MapTileEntity = {
+    x: number;
+    y: number;
+    kind: "obj" | "npc";
+    entityId: number;
+};
+
 /**
  * Aplica sobre el mapa recien cargado los tiles editados desde el modo
  * construccion.
@@ -771,7 +823,12 @@ type MapTileOverride = {
 async function applyMapOverrides(
     mapData: MapData,
     mapNumber: number,
+    options?: {
+        strict?: boolean;
+    },
 ): Promise<void> {
+    const strict = Boolean(options?.strict);
+
     try {
         const response = await fetch(
             `${getApiBaseUrl()}/maps/${mapNumber}/overrides`,
@@ -779,16 +836,25 @@ async function applyMapOverrides(
         );
 
         if (!response.ok) {
+            if (strict) {
+                throw new Error(
+                    `Failed to fetch overrides for map ${mapNumber} (HTTP ${response.status})`,
+                );
+            }
             return;
         }
 
         const payload = (await response.json()) as {
             overrides?: MapTileOverride[];
+            entities?: MapTileEntity[];
         };
 
         const overrides = payload.overrides ?? [];
+        const objEntities = (payload.entities ?? []).filter(
+            (entity) => entity.kind === "obj",
+        );
 
-        if (overrides.length === 0) {
+        if (overrides.length === 0 && objEntities.length === 0) {
             return;
         }
 
@@ -798,13 +864,20 @@ async function applyMapOverrides(
             return;
         }
 
-        for (const override of overrides) {
-            const row = mapEntry[String(override.y)];
-            const tile = row?.[String(override.x)];
-
-            if (!tile) {
-                continue;
+        const ensureTile = (x: number, y: number) => {
+            const rowKey = String(y);
+            const colKey = String(x);
+            if (!mapEntry[rowKey]) {
+                mapEntry[rowKey] = {};
             }
+            if (!mapEntry[rowKey][colKey]) {
+                mapEntry[rowKey][colKey] = {};
+            }
+            return mapEntry[rowKey][colKey];
+        };
+
+        for (const override of overrides) {
+            const tile = ensureTile(override.x, override.y);
 
             const graphics = (tile.graphics ?? {}) as Record<string, number>;
 
@@ -826,10 +899,21 @@ async function applyMapOverrides(
             }
         }
 
+        for (const entity of objEntities) {
+            const tile = ensureTile(entity.x, entity.y);
+            tile.objInfo = {
+                objIndex: entity.entityId,
+                amount: 1,
+            };
+        }
+
         console.log(
-            `[MAPA] ${overrides.length} tiles editados aplicados al mapa ${mapNumber}.`,
+            `[MAPA] ${overrides.length} tiles editados y ${objEntities.length} objetos aplicados al mapa ${mapNumber}.`,
         );
     } catch (error) {
+        if (strict) {
+            throw error;
+        }
         console.warn(
             `[MAPA] No se pudieron aplicar los tiles editados del mapa ${mapNumber}:`,
             error,

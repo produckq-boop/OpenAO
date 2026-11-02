@@ -18,6 +18,7 @@ import type {
 } from "./types/runtime";
 
 import { reloadBalanceDiff, reloadCraftingRecipesDiff, reloadNpcsDiff, reloadObjectsDiff } from "./gameDataSync";
+import { reloadPublishedMapFromApi } from "./mapLiveSync";
 import {
     appendMapNpcPlacement,
     loadAllMapNpcPlacements,
@@ -3785,6 +3786,47 @@ const command: CommandApi = {
                         0,
                         ws as CommandClient,
                     );
+                    break;
+                }
+
+                case "/recargarmapa": {
+                    if (!hasAdminPrivileges(user)) {
+                        break;
+                    }
+
+                    const rawTargetMap = nextText.trim();
+                    const targetMapNum = rawTargetMap ? Number.parseInt(rawTargetMap, 10) : Number(user.map);
+
+                    if (!Number.isInteger(targetMapNum) || targetMapNum <= 0) {
+                        handleProtocol.console(
+                            "[ERROR] Uso: /recargarmapa [numero_de_mapa]",
+                            "red",
+                            1,
+                            0,
+                            ws as CommandClient,
+                        );
+                        break;
+                    }
+
+                    try {
+                        const result = await reloadPublishedMapFromApi(targetMapNum);
+                        handleProtocol.console(
+                            `[INFO] Mapa ${result.mapNum} recargado en vivo (version ${result.version}). Tiles: ${result.appliedOverrides}, bloqueos: ${result.blockedChanges}, objs +${result.spawnedObjects}/-${result.removedObjects}, npcs +${result.spawnedNpcs}/-${result.removedNpcs}, reubicados: ${result.relocatedPlayers}.`,
+                            "#E69500",
+                            0,
+                            0,
+                            ws as CommandClient,
+                        );
+                    } catch (error) {
+                        const message = error instanceof Error ? error.message : String(error);
+                        handleProtocol.console(
+                            `[ERROR] No se pudo recargar el mapa ${targetMapNum}: ${message}`,
+                            "red",
+                            1,
+                            0,
+                            ws as CommandClient,
+                        );
+                    }
                     break;
                 }
 

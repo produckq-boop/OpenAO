@@ -79,6 +79,8 @@ export type IncomingPacketHandlerContext = {
         updater: (current: any) => any,
     ) => void;
     ensureMapTile: (engine: any, map: number, x: number, y: number) => any;
+    applyPendingTileStates: (engine: any) => void;
+    renderMap: (engine: any) => Promise<void>;
     queueTileObjectVisualSync: (
         engine: any,
         map: number,

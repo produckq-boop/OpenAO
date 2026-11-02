@@ -4,6 +4,8 @@
  * navegador nunca ve esos secretos.
  */
 
+import { invalidateMapCache } from "../../utils/gameLoader";
+
 export type EditorObject = {
     id: number;
     name: string;
@@ -261,6 +263,8 @@ export async function publishMapChanges(mapNum: number): Promise<void> {
     if (!response.ok) {
         throw new Error(response.data.error ?? "No se pudo publicar el mapa.");
     }
+
+    invalidateMapCache(mapNum);
 }
 
 export async function discardMapDrafts(mapNum: number): Promise<void> {
@@ -283,6 +287,8 @@ export async function revertMapChanges(mapNum: number): Promise<void> {
     if (!response.ok) {
         throw new Error(response.data.error ?? "No se pudo revertir el mapa.");
     }
+
+    invalidateMapCache(mapNum);
 }
 
 export async function uploadGraphicPng(

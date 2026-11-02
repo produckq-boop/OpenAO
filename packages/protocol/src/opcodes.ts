@@ -77,6 +77,7 @@ export const CLIENT_PACKET_ID = {
     selfMapMetaDelta: 79,
     spellVisual: 80,
     entityVitalsDelta: 81,
+    mapLiveReload: 82,
 } as const;
 
 export const SERVER_PACKET_ID = {

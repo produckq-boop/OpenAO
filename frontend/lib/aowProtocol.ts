@@ -564,6 +564,10 @@ export type ParsedServerPacket =
           payload: { map: number; x: number; y: number; blocked: number };
       }
     | {
+          type: "mapLiveReload";
+          payload: { mapNum: number; version: number };
+      }
+    | {
           type: "changeBody";
           payload: {
               id: number;
@@ -1562,6 +1566,14 @@ function parseServerPacketById(
                 type: "pong",
                 payload: {
                     token: reader.canReadBytes(4) ? reader.getInt() : 0,
+                },
+            };
+        case CLIENT_PACKET_ID.mapLiveReload:
+            return {
+                type: "mapLiveReload",
+                payload: {
+                    mapNum: reader.getShort(),
+                    version: reader.getInt(),
                 },
             };
         default:

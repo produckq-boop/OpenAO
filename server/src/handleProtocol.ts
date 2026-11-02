@@ -335,6 +335,7 @@ export type HandleProtocolApi = {
     clanState: (delta: ClanRuntimeStateDelta, client: RuntimeClient) => void;
     startCastBar: (idUser: EntityId, durationMs: number, client: RuntimeClient) => void;
     stopCastBar: (idUser: EntityId, client: RuntimeClient) => void;
+    mapLiveReload: (idMap: number, version: number, client: RuntimeClient) => void;
 };
 
 function getCharacter(idUser: EntityId) {
@@ -1564,6 +1565,18 @@ const handleServer: HandleProtocolApi = {
         pkg.setPackageID(pkg.clientPacketID.clanState);
         pkg.writeString(JSON.stringify(delta));
         socket.send(client);
+    },
+
+    mapLiveReload(idMap, version, client) {
+        try {
+            pkg.setPackageID(pkg.clientPacketID.mapLiveReload);
+            pkg.writeShort(idMap);
+            pkg.writeInt(version);
+
+            socket.send(client);
+        } catch (err) {
+            funct.dumpError(err);
+        }
     },
 };
 

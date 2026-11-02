@@ -451,11 +451,181 @@ export async function listMapTileEntities(
     }));
 }
 
+export type PublishedMapSnapshot = {
+    mapNum: number;
+    version: number;
+    overrides: MapTileOverride[];
+    entities: MapTileEntity[];
+};
+
+export type AllPublishedMapsSnapshot = {
+    currentVersion: number;
+    maps: Array<{
+        mapNum: number;
+        overrides: MapTileOverride[];
+        entities: MapTileEntity[];
+    }>;
+};
+
+let syncStateTablePromise: Promise<void> | null = null;
+
+function ensureSyncStateTable(): Promise<void> {
+    if (!syncStateTablePromise) {
+        syncStateTablePromise = pool
+            .query(
+                `CREATE TABLE IF NOT EXISTS game_data_sync_state (
+                    domain TEXT PRIMARY KEY,
+                    current_version BIGINT NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )`,
+            )
+            .then(() => undefined)
+            .catch((error) => {
+                syncStateTablePromise = null;
+                throw error;
+            });
+    }
+
+    return syncStateTablePromise;
+}
+
+async function bumpPublishedMapsVersion(client: {
+    query: <T extends Record<string, unknown> = Record<string, unknown>>(
+        sql: string,
+        params?: unknown[],
+    ) => Promise<{ rows: T[]; rowCount?: number | null }>;
+}): Promise<number> {
+    const versionResult = await client.query<{
+        current_version: string | number;
+    }>(
+        `INSERT INTO game_data_sync_state (domain, current_version, updated_at)
+         VALUES ('maps', 1, NOW())
+         ON CONFLICT (domain) DO UPDATE
+         SET current_version = game_data_sync_state.current_version + 1,
+             updated_at = NOW()
+         RETURNING current_version`,
+    );
+
+    return Number(versionResult.rows[0]?.current_version ?? 0);
+}
+
+export async function getCurrentPublishedMapsVersion(): Promise<number> {
+    await ensureSyncStateTable();
+
+    const result = await pool.query<{ current_version: string | number }>(
+        `SELECT current_version
+         FROM game_data_sync_state
+         WHERE domain = 'maps'
+         LIMIT 1`,
+    );
+
+    return Number(result.rows[0]?.current_version ?? 0);
+}
+
+export async function getPublishedMapSnapshot(
+    mapNum: number,
+): Promise<PublishedMapSnapshot> {
+    const [version, overrides, entities] = await Promise.all([
+        getCurrentPublishedMapsVersion(),
+        listMapOverrides(mapNum, false),
+        listMapTileEntities(mapNum, false),
+    ]);
+
+    return {
+        mapNum,
+        version,
+        overrides,
+        entities,
+    };
+}
+
+export async function listAllPublishedMapsSnapshot(): Promise<AllPublishedMapsSnapshot> {
+    const [currentVersion, overridesResult, entitiesResult] = await Promise.all([
+        getCurrentPublishedMapsVersion(),
+        pool.query<{
+            map_num: number;
+            x: number;
+            y: number;
+            layer: number;
+            grh_index: number | null;
+            blocked: boolean | null;
+            status: string;
+        }>(
+            `SELECT map_num, x, y, layer, grh_index, blocked, status
+             FROM game_map_tile_overrides
+             WHERE status = 'published'
+             ORDER BY map_num, y, x, layer`,
+        ),
+        pool.query<{
+            map_num: number;
+            x: number;
+            y: number;
+            kind: string;
+            entity_id: number;
+            status: string;
+        }>(
+            `SELECT map_num, x, y, kind, entity_id, status
+             FROM game_map_tile_entities
+             WHERE status = 'published'
+             ORDER BY map_num, y, x, kind`,
+        ),
+    ]);
+
+    const byMap = new Map<
+        number,
+        {
+            mapNum: number;
+            overrides: MapTileOverride[];
+            entities: MapTileEntity[];
+        }
+    >();
+
+    const ensureEntry = (mapNum: number) => {
+        let entry = byMap.get(mapNum);
+        if (!entry) {
+            entry = { mapNum, overrides: [], entities: [] };
+            byMap.set(mapNum, entry);
+        }
+        return entry;
+    };
+
+    for (const row of overridesResult.rows) {
+        ensureEntry(row.map_num).overrides.push({
+            x: row.x,
+            y: row.y,
+            layer: row.layer,
+            grhIndex: row.grh_index,
+            blocked: row.blocked,
+            status: row.status as "draft" | "published",
+        });
+    }
+
+    for (const row of entitiesResult.rows) {
+        ensureEntry(row.map_num).entities.push({
+            x: row.x,
+            y: row.y,
+            kind: row.kind as TileEntityKind,
+            entityId: row.entity_id,
+            status: row.status as "draft" | "published",
+        });
+    }
+
+    const maps = [...byMap.values()].sort(
+        (left, right) => left.mapNum - right.mapNum,
+    );
+
+    return {
+        currentVersion,
+        maps,
+    };
+}
+
 /** Publica los borradores de un mapa: a partir de aca los ven los jugadores. */
 export async function publishMap(
     mapNum: number,
     accountId: string,
-): Promise<{ published: number; publishedEntities: number }> {
+): Promise<{ published: number; publishedEntities: number; version: number }> {
+    await ensureSyncStateTable();
     const client = await pool.connect();
 
     try {
@@ -498,11 +668,14 @@ export async function publishMap(
             [mapNum],
         );
 
+        const version = await bumpPublishedMapsVersion(client);
+
         await client.query("COMMIT");
 
         return {
             published: result.rowCount ?? 0,
             publishedEntities: entitiesResult.rowCount ?? 0,
+            version,
         };
     } catch (error) {
         await client.query("ROLLBACK");
@@ -538,21 +711,38 @@ export async function discardDrafts(
  */
 export async function revertMap(
     mapNum: number,
-): Promise<{ reverted: number; revertedEntities: number }> {
-    const result = await pool.query(
-        `DELETE FROM game_map_tile_overrides WHERE map_num = $1`,
-        [mapNum],
-    );
+): Promise<{ reverted: number; revertedEntities: number; version: number }> {
+    await ensureSyncStateTable();
+    const client = await pool.connect();
 
-    const entitiesResult = await pool.query(
-        `DELETE FROM game_map_tile_entities WHERE map_num = $1`,
-        [mapNum],
-    );
+    try {
+        await client.query("BEGIN");
 
-    return {
-        reverted: result.rowCount ?? 0,
-        revertedEntities: entitiesResult.rowCount ?? 0,
-    };
+        const result = await client.query(
+            `DELETE FROM game_map_tile_overrides WHERE map_num = $1`,
+            [mapNum],
+        );
+
+        const entitiesResult = await client.query(
+            `DELETE FROM game_map_tile_entities WHERE map_num = $1`,
+            [mapNum],
+        );
+
+        const version = await bumpPublishedMapsVersion(client);
+
+        await client.query("COMMIT");
+
+        return {
+            reverted: result.rowCount ?? 0,
+            revertedEntities: entitiesResult.rowCount ?? 0,
+            version,
+        };
+    } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    } finally {
+        client.release();
+    }
 }
 
 /** Cuantos tiles y entidades tiene el mapa en cada estado, para mostrar en la UI. */
