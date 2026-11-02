@@ -652,3 +652,89 @@ CREATE INDEX IF NOT EXISTS idx_game_map_tile_entities_map
     ON game_map_tile_entities(map_num, status);
 CREATE INDEX IF NOT EXISTS idx_game_uploaded_graphics_created_at
     ON game_uploaded_graphics(created_at DESC);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  Modo construccion: propuesta y moderacion de mapas de usuario
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Cuentas habilitadas para revisar la cola de mapas de usuario sin depender
+-- de un unico administrador global.
+CREATE TABLE IF NOT EXISTS map_moderators (
+    account_id UUID PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+    granted_by_account_id UUID REFERENCES accounts(id) ON DELETE SET NULL,
+    note TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Mapas creados por jugadores y su ciclo de moderacion:
+-- draft -> proposed -> in_review -> published | rejected (y unpublished).
+CREATE TABLE IF NOT EXISTS user_maps (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    name TEXT NOT NULL CHECK (BTRIM(name) <> '' AND CHAR_LENGTH(name) <= 80),
+    description TEXT NOT NULL DEFAULT '' CHECK (CHAR_LENGTH(description) <= 500),
+    width INTEGER NOT NULL DEFAULT 100 CHECK (width BETWEEN 10 AND 100),
+    height INTEGER NOT NULL DEFAULT 100 CHECK (height BETWEEN 10 AND 100),
+    spawn_x INTEGER NOT NULL DEFAULT 50,
+    spawn_y INTEGER NOT NULL DEFAULT 50,
+    map_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+    npc_count INTEGER NOT NULL DEFAULT 0 CHECK (npc_count >= 0 AND npc_count <= 50),
+    object_count INTEGER NOT NULL DEFAULT 0 CHECK (object_count >= 0 AND object_count <= 200),
+    sign_count INTEGER NOT NULL DEFAULT 0 CHECK (sign_count >= 0 AND sign_count <= 50),
+    state TEXT NOT NULL DEFAULT 'draft' CHECK (
+        state IN ('draft', 'proposed', 'in_review', 'published', 'rejected', 'unpublished')
+    ),
+    reviewer_account_id UUID REFERENCES accounts(id) ON DELETE SET NULL,
+    rejection_reason TEXT,
+    open_report_count INTEGER NOT NULL DEFAULT 0 CHECK (open_report_count >= 0),
+    proposed_at TIMESTAMPTZ,
+    reviewed_at TIMESTAMPTZ,
+    published_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (spawn_x BETWEEN 1 AND width AND spawn_y BETWEEN 1 AND height),
+    CHECK (
+        state <> 'rejected'
+        OR (rejection_reason IS NOT NULL AND BTRIM(rejection_reason) <> '')
+    )
+);
+
+CREATE TABLE IF NOT EXISTS user_map_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    map_id UUID NOT NULL REFERENCES user_maps(id) ON DELETE CASCADE,
+    reporter_account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL CHECK (BTRIM(reason) <> '' AND CHAR_LENGTH(reason) <= 500),
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
+    resolved_by_account_id UUID REFERENCES accounts(id) ON DELETE SET NULL,
+    resolved_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS user_map_moderation_logs (
+    id BIGSERIAL PRIMARY KEY,
+    map_id UUID NOT NULL REFERENCES user_maps(id) ON DELETE CASCADE,
+    actor_account_id UUID REFERENCES accounts(id) ON DELETE SET NULL,
+    action TEXT NOT NULL CHECK (
+        action IN ('propose', 'start_review', 'approve', 'reject', 'report', 'unpublish', 'edit_reset')
+    ),
+    from_state TEXT NOT NULL,
+    to_state TEXT NOT NULL,
+    reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_maps_owner_account_id
+    ON user_maps(owner_account_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_maps_public_published
+    ON user_maps(published_at DESC)
+    WHERE state = 'published';
+CREATE INDEX IF NOT EXISTS idx_user_maps_moderation_queue
+    ON user_maps(open_report_count DESC, proposed_at ASC)
+    WHERE state IN ('proposed', 'in_review');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_map_reports_open_unique
+    ON user_map_reports(map_id, reporter_account_id)
+    WHERE status = 'open';
+CREATE INDEX IF NOT EXISTS idx_user_map_reports_map_status
+    ON user_map_reports(map_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_map_moderation_logs_map_id
+    ON user_map_moderation_logs(map_id, created_at DESC);

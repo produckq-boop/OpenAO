@@ -576,3 +576,164 @@ export type ChallengeHistoryEntry = {
     finishedAt: Date;
     createdAt: Date;
 };
+
+export type UserMapState =
+    | "draft"
+    | "proposed"
+    | "in_review"
+    | "published"
+    | "rejected"
+    | "unpublished";
+
+export type UserMapModerationAction =
+    | "propose"
+    | "start_review"
+    | "approve"
+    | "reject"
+    | "report"
+    | "unpublish"
+    | "edit_reset";
+
+export type UserMapCoordinate = {
+    x: number;
+    y: number;
+};
+
+export type UserMapTileEntry = {
+    x: number;
+    y: number;
+    layer: number;
+    grhIndex?: number | null;
+    blocked?: boolean | null;
+};
+
+export type UserMapNpcPlacement = {
+    x: number;
+    y: number;
+    npcId: number;
+    name?: string;
+    dialogue?: string;
+};
+
+export type UserMapObjectPlacement = {
+    x: number;
+    y: number;
+    objectId: number;
+    amount?: number;
+};
+
+export type UserMapSignEntry = {
+    x: number;
+    y: number;
+    text: string;
+};
+
+export type UserMapExitEntry = {
+    x: number;
+    y: number;
+    targetMap?: number;
+    targetX?: number;
+    targetY?: number;
+};
+
+export type UserMapTeleportEntry = {
+    fromX: number;
+    fromY: number;
+    toX: number;
+    toY: number;
+};
+
+export type UserMapContent = {
+    tiles: UserMapTileEntry[];
+    blockedTiles: UserMapCoordinate[];
+    npcs: UserMapNpcPlacement[];
+    objects: UserMapObjectPlacement[];
+    signs: UserMapSignEntry[];
+    exits: UserMapExitEntry[];
+    teleports: UserMapTeleportEntry[];
+};
+
+export type UserMapRecord = {
+    id: string;
+    owner_account_id: string;
+    owner_name?: string;
+    owner_email?: string;
+    name: string;
+    description: string;
+    width: number;
+    height: number;
+    spawn_x: number;
+    spawn_y: number;
+    map_data: UserMapContent;
+    npc_count: number;
+    object_count: number;
+    sign_count: number;
+    state: UserMapState;
+    reviewer_account_id: string | null;
+    rejection_reason: string | null;
+    open_report_count: number;
+    proposed_at: Date | null;
+    reviewed_at: Date | null;
+    published_at: Date | null;
+    created_at: Date;
+    updated_at: Date;
+};
+
+export type UserMapSummary = {
+    id: string;
+    ownerAccountId: string;
+    ownerName: string | null;
+    name: string;
+    description: string;
+    width: number;
+    height: number;
+    spawn: UserMapCoordinate;
+    npcCount: number;
+    objectCount: number;
+    signCount: number;
+    state: UserMapState;
+    reviewerAccountId: string | null;
+    rejectionReason: string | null;
+    openReportCount: number;
+    proposedAt: string | null;
+    reviewedAt: string | null;
+    publishedAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type UserMapDetails = UserMapSummary & {
+    mapData: UserMapContent;
+};
+
+export type UserMapReportRecord = {
+    id: string;
+    map_id: string;
+    reporter_account_id: string;
+    reporter_name?: string;
+    reason: string;
+    status: "open" | "resolved";
+    resolved_by_account_id: string | null;
+    resolved_at: Date | null;
+    created_at: Date;
+};
+
+export type UserMapModerationLogRecord = {
+    id: string | number;
+    map_id: string;
+    actor_account_id: string | null;
+    action: UserMapModerationAction;
+    from_state: UserMapState;
+    to_state: UserMapState;
+    reason: string | null;
+    created_at: Date;
+};
+
+export type MapModeratorRecord = {
+    account_id: string;
+    account_name?: string;
+    account_email?: string;
+    granted_by_account_id: string | null;
+    note: string | null;
+    created_at: Date;
+};
